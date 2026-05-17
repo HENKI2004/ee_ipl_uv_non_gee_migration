@@ -1,5 +1,11 @@
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IPL-UV/ee_ipl_uv/blob/master/examples/cloudscore_different_preds.ipynb)
 
+# Multitemporal Cloud Masking - Non-GEE Migration & Evaluation
+
+This repository is a fork of the [IPL-UV/ee_ipl_uv](https://github.com/IPL-UV/ee_ipl_uv) library, heavily adapted as part of the block seminar at the **University of Würzburg**. 
+
+The primary objective of this project is to decouple the algorithm from the Google Earth Engine (GEE) ecosystem and port it to a standalone, non-GEE Python environment.
+
 # Multitemporal Cloud Masking in the GEE
 
 This project contains a python package that extends the functionality of the [Google Earth Engine python API](https://developers.google.com/earth-engine/#api) (`ee`) to
