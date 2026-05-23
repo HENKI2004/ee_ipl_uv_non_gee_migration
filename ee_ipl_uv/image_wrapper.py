@@ -1,32 +1,41 @@
-import ee
 import re
+
+import ee
 
 
 def clouds_bqa_landsat(ee_img):
-    return ee_img.select(['BQA'], ["cloud"]).bitwiseAnd(int('0000000000010000', 2)).gt(0)
+    return (
+        ee_img.select(["QA_PIXEL"], ["cloud"])
+        .bitwiseAnd(int("0000000000010000", 2))
+        .gt(0)
+    )
 
 
 class L8L1TImage:
-    def __init__(self, index, collection="LANDSAT/LC08/C01/T1_TOA"):
+    def __init__(self, index, collection="LANDSAT/LC08/C02/T1_TOA"):
         if collection.endswith("/"):
             collection = collection[:-1]
-        self.ee_img = ee.Image(collection+"/"+index)
+        self.ee_img = ee.Image(collection + "/" + index)
         self.collection = collection
         self.index = index
         self.clouds_bqa_fun = clouds_bqa_landsat
 
     def collection_similar(self, region_of_interest=None):
-        matches = re.match("LC08_(\d{3})(\d{3})_\d{8}", self.index)
+        matches = re.match(r"LC08_(\d{3})(\d{3})_\d{8}", self.index)
         path, row = matches.groups()
         if region_of_interest is None:
             # region_of_interest = ee.Element.geometry(self.ee_img)
-            landsat_collection = ee.ImageCollection(self.collection) \
-                .filter(ee.Filter.eq("WRS_ROW", int(row))) \
-                .filter(ee.Filter.eq("WRS_PATH", int(path)))
-        else:
-            landsat_collection = ee.ImageCollection(self.collection) \
-                .filterBounds(region_of_interest) \
+            landsat_collection = (
+                ee.ImageCollection(self.collection)
                 .filter(ee.Filter.eq("WRS_ROW", int(row)))
+                .filter(ee.Filter.eq("WRS_PATH", int(path)))
+            )
+        else:
+            landsat_collection = (
+                ee.ImageCollection(self.collection)
+                .filterBounds(region_of_interest)
+                .filter(ee.Filter.eq("WRS_ROW", int(row)))
+            )
 
         return landsat_collection
 
@@ -43,28 +52,28 @@ class L8L1TImage:
         return 15
 
     def all_bands(self):
-        return self.reflectance_bands() + ["BQA"]
+        return self.reflectance_bands() + ["QA_PIXEL"]
 
     def clouds_bqa(self):
         return clouds_bqa_landsat(self.ee_img)
 
 
 def toa_norm_s2l1c(ee_img):
-    ee_img_rads = ee_img.select(S2L1CImage.reflectance_bands()).divide(10000.)
+    ee_img_rads = ee_img.select(S2L1CImage.reflectance_bands()).divide(10000.0)
     return ee_img.addBands(ee_img_rads, overwrite=True)
 
 
 # COPERNICUS/S2/20181107T105231_20181107T105655_T30SYJ
 class S2L1CImage:
-    def __init__(self, index, collection="COPERNICUS/S2/", force_tile=True):
+    def __init__(self, index, collection="COPERNICUS/S2_HARMONIZED", force_tile=True):
         if collection.endswith("/"):
             collection = collection[:-1]
 
         self.index = index
-        ee_img = ee.Image(collection+"/"+index)
+        ee_img = ee.Image(collection + "/" + index)
         self.force_tile = force_tile
 
-        ee_img_rads = ee_img.select(S2L1CImage.reflectance_bands()).divide(10000.)
+        ee_img_rads = ee_img.select(S2L1CImage.reflectance_bands()).divide(10000.0)
         self.ee_img = ee_img.addBands(ee_img_rads, overwrite=True)
         self.collection = collection
         self.clouds_bqa_fun = clouds_bqa_sentinel2
@@ -72,7 +81,21 @@ class S2L1CImage:
 
     @classmethod
     def reflectance_bands(cls):
-        return ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B10", "B11", "B12"]
+        return [
+            "B1",
+            "B2",
+            "B3",
+            "B4",
+            "B5",
+            "B6",
+            "B7",
+            "B8",
+            "B8A",
+            "B9",
+            "B10",
+            "B11",
+            "B12",
+        ]
 
     @classmethod
     def rgb_bands(cls):
@@ -90,7 +113,9 @@ class S2L1CImage:
         # Force same tile
         if self.force_tile:
             mgrs_tile = self.index.split("_")[-1][1:]
-            assert len(mgrs_tile) == 5, "Unrecognized index mrgs tile {} {}".format(self.index, mgrs_tile)
+            assert len(mgrs_tile) == 5, "Unrecognized index mrgs tile {} {}".format(
+                self.index, mgrs_tile
+            )
             s2collection = s2collection.filter(ee.Filter.eq("MGRS_TILE", mgrs_tile))
         elif region_of_interest is not None:
             s2collection = collection_mosaic_day(s2collection, region_of_interest)
@@ -98,7 +123,7 @@ class S2L1CImage:
         return s2collection
 
     def all_bands(self):
-        return self.reflectance_bands() + ["QA60"]
+        return self.reflectance_bands()
 
     def clouds_bqa(self):
         return clouds_bqa_sentinel2(self.ee_img)
@@ -118,10 +143,12 @@ def collection_mosaic_day(imcol, region_of_interest):
     # longitude, latitude = region_of_interest.centroid().coordinates().getInfo()
     longitude = region_of_interest.centroid().coordinates().get(0)
 
-    hours_add = ee.Number(longitude).multiply(12/180.)
+    hours_add = ee.Number(longitude).multiply(12 / 180.0)
     # solar_time = utc_time - hours_add
 
-    unique_solar_dates = imlist.map(lambda im: ee.Image(im).date().advance(hours_add, "hour").format("YYYY-MM-dd")).distinct()
+    unique_solar_dates = imlist.map(
+        lambda im: ee.Image(im).date().advance(hours_add, "hour").format("YYYY-MM-dd")
+    ).distinct()
 
     def mosaic_date(solar_date_str):
         solar_date = ee.Date(solar_date_str)
@@ -129,10 +156,12 @@ def collection_mosaic_day(imcol, region_of_interest):
 
         im = imcol.filterDate(utc_date, utc_date.advance(1, "day")).mosaic()
         # im = im.reproject(ee.Projection("EPSG:3857"), scale=10)
-        return im.set({
-            "system:time_start": utc_date.millis(),
-            "system:id": solar_date.format("YYYY-MM-dd")
-        })
+        return im.set(
+            {
+                "system:time_start": utc_date.millis(),
+                "system:id": solar_date.format("YYYY-MM-dd"),
+            }
+        )
 
     mosaic_imlist = unique_solar_dates.map(mosaic_date)
     return ee.ImageCollection(mosaic_imlist)
@@ -150,9 +179,37 @@ def clouds_bqa_sentinel2(ee_img):
                  .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
     :return:
     """
-    qa = ee_img.select(['QA60'], ["cloud"])
-    cloud_bit_mask = int("0000010000000000", 2)
-    cirrus_bit_mask = int("0000100000000000", 2)
-    return qa.bitwiseAnd(cloud_bit_mask).gt(0).Or(qa.bitwiseAnd(cirrus_bit_mask).gt(0))
+    bands = ee_img.bandNames()
 
+    dummy_qa60 = (
+        ee.Image.constant(0).rename(["QA60"]).updateMask(ee_img.select([0]).mask())
+    )
+    dummy_opaque = (
+        ee.Image.constant(0)
+        .rename(["MSK_CLASSI_OPAQUE"])
+        .updateMask(ee_img.select([0]).mask())
+    )
+    dummy_cirrus = (
+        ee.Image.constant(0)
+        .rename(["MSK_CLASSI_CIRRUS"])
+        .updateMask(ee_img.select([0]).mask())
+    )
 
+    img_safe = (
+        ee_img.addBands(dummy_qa60, overwrite=False)
+        .addBands(dummy_opaque, overwrite=False)
+        .addBands(dummy_cirrus, overwrite=False)
+    )
+
+    qa60_cloud = img_safe.select(["QA60"]).bitwiseAnd(1024).gt(0)  # 1 << 10
+    qa60_cirrus = img_safe.select(["QA60"]).bitwiseAnd(2048).gt(0)  # 1 << 11
+    mask_qa60 = qa60_cloud.Or(qa60_cirrus).rename(["cloud"])
+
+    mask_msk = (
+        img_safe.select(["MSK_CLASSI_OPAQUE"])
+        .gt(0)
+        .Or(img_safe.select(["MSK_CLASSI_CIRRUS"]).gt(0))
+        .rename(["cloud"])
+    )
+
+    return ee.Image(ee.Algorithms.If(bands.contains("QA60"), mask_qa60, mask_msk))
