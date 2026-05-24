@@ -1,13 +1,18 @@
-from ee_ipl_uv import normalization
-import ee
+import numpy as np
+from scipy.ndimage import binary_opening
+from sklearn.cluster import KMeans
 
 BANDS_MODEL = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B9", "B10", "B11"]
 
 
-def SelectClusters(image,
-                   background_prediction,
-                   result_clustering,n_clusters, bands_thresholds=["B2", "B3", "B4"],
-                   region_of_interest=None):
+def SelectClusters(
+    image,
+    background_prediction,
+    result_clustering,
+    n_clusters,
+    bands_thresholds=["B2", "B3", "B4"],
+    region_of_interest=None,
+):
     """
     Function that contains the logic to create the cluster score mask. given the clustering result.
 
@@ -18,57 +23,57 @@ def SelectClusters(image,
     :param region_of_interest:
     :return:
     """
-    bands_norm_difference = [b+"_difference" for b in bands_thresholds]
 
-    img_joined = image.subtract(background_prediction)\
-                      .select(bands_thresholds, bands_norm_difference)\
-                      .addBands(image.select(bands_thresholds))
+    if isinstance(result_clustering, np.ndarray):
+        diff_dict = {}
+        for b in bands_thresholds:
+            diff_dict[b] = (
+                image[b] - background_prediction[b]
+            )  # bands_norm_difference = [b+"_difference" for b in bands_thresholds]
 
-    bands_and_difference_bands = bands_thresholds+bands_norm_difference
+        multitemporal_score = np.zeros_like(result_clustering, dtype=np.float32)
+        reflectance_score = np.zeros_like(result_clustering, dtype=np.float32)
 
-    multitemporal_score = None
-    reflectance_score = None
+        for i in range(n_clusters):
+            cluster_mask = result_clustering == i
+            if not np.any(cluster_mask):
+                continue
 
-    for i in range(n_clusters):
-        img_diff_clus = img_joined.updateMask(result_clustering.eq(i)).select(bands_and_difference_bands)
-        clusteri = img_diff_clus.reduceRegion(ee.Reducer.mean(),
-                                              geometry=region_of_interest,
-                                              bestEffort=True,
-                                              scale=30)
-        clusteri_diff = clusteri.toArray(bands_norm_difference)
-        clusteri_refl = clusteri.toArray(bands_thresholds)
-        clusteri_refl_norm = clusteri_refl.multiply(clusteri_refl).reduce(ee.Reducer.mean(),
-                                                                          axes=[0]).sqrt().get([0])
+            refl_values = [image[b][cluster_mask] for b in bands_thresholds]
+            refl_stack = np.stack(refl_values, axis=0)
 
-        clusteridiff_mean = clusteri_diff.reduce(ee.Reducer.mean(), axes=[0]).get([0])
-        clusteridiff_norm = clusteri_diff.multiply(clusteri_diff).reduce(ee.Reducer.mean(),
-                                                                          axes=[0]).sqrt().get([0])
+            clusteri_refl_norm = np.sqrt(np.mean(refl_stack**2))
 
-        multitemporal_score_clusteri = ee.Algorithms.If(clusteridiff_mean.gt(0),
-                                        clusteridiff_norm, clusteridiff_norm.multiply(-1))
+            diff_values = [diff_dict[b][cluster_mask] for b in bands_thresholds]
+            diff_stack = np.stack(diff_values, axis=0)
 
-        multitemporal_score_clusteri = result_clustering.eq(i).toFloat().multiply(ee.Number(multitemporal_score_clusteri))
-        reflectance_score_clusteri = result_clustering.eq(i).toFloat().multiply(ee.Number(clusteri_refl_norm))
+            clusteridiff_mean = np.mean(diff_stack)
+            clusteridiff_norm = np.sqrt(np.mean(diff_stack**2))
 
-        if multitemporal_score is None:
-            multitemporal_score = multitemporal_score_clusteri
-            reflectance_score = reflectance_score_clusteri
-        else:
-            multitemporal_score = multitemporal_score.add(multitemporal_score_clusteri)
-            reflectance_score = reflectance_score.add(reflectance_score_clusteri)
+            if clusteridiff_mean > 0:
+                multitemporal_score_clusteri = clusteridiff_norm
+            else:
+                multitemporal_score_clusteri = clusteridiff_norm * -1
 
-    return multitemporal_score, reflectance_score
+            multitemporal_score[cluster_mask] = multitemporal_score_clusteri
+            reflectance_score[cluster_mask] = clusteri_refl_norm
+
+        return multitemporal_score, reflectance_score
 
 
-def ClusterClouds(image,
-                  background_prediction,
-                  threshold_dif_cloud=.045,
-                  do_clustering=True, numPixels=1000,
-                  threshold_reflectance=.175,
-                  bands_thresholds=["B2", "B3", "B4"],
-                  bands_clustering=BANDS_MODEL,
-                  growing_ratio=2,
-                  n_clusters=10, region_of_interest=None):
+def ClusterClouds(
+    image,
+    background_prediction,
+    threshold_dif_cloud=0.045,
+    do_clustering=True,
+    numPixels=1000,
+    threshold_reflectance=0.175,
+    bands_thresholds=["B2", "B3", "B4"],
+    bands_clustering=BANDS_MODEL,
+    growing_ratio=2,
+    n_clusters=10,
+    region_of_interest=None,
+):
     """
     Function that compute the cloud score given the differences between the real and predicted image.
 
@@ -84,53 +89,58 @@ def ClusterClouds(image,
     :return: ee.Image with 0 for clear pixels, 1 for shadow pixels and 2 for cloudy pixels
     """
 
-    img_differences = image.subtract(background_prediction)
+    if isinstance(image, dict):
+        img_differences = {
+            b: image[b] - background_prediction[b] for b in bands_clustering
+        }
 
-    if do_clustering:
-        training = img_differences.select(bands_clustering).sample(region=region_of_interest, scale=30,
-                                                                   numPixels=numPixels)
+        if do_clustering:
+            h, w = image[bands_clustering[0]].shape
+            bands_data = [img_differences[b].ravel() for b in bands_clustering]
+            X = np.stack(bands_data, axis=-1)
 
-        training, media, std = normalization.ComputeNormalizationFeatureCollection(training,
-                                                                                   bands_clustering)
-        clusterer = ee.Clusterer.wekaKMeans(n_clusters).train(training)
-        img_differences_normalized = normalization.ApplyNormalizationImage(img_differences,
-                                                                           bands_clustering,
-                                                                           media, std)
-        result = img_differences_normalized.cluster(clusterer)
+            X_mean = np.mean(X, axis=0)
+            X_std = np.std(X, axis=0) + 1e-6
+            X_normalized = (X - X_mean) / X_std
 
-        multitemporal_score, reflectance_score = SelectClusters(image, background_prediction,
-                                                                result, n_clusters, bands_thresholds,
-                                                                region_of_interest)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            flat_labels = kmeans.fit_predict(X_normalized)
+            result = flat_labels.reshape(h, w)
 
-    else:
-        arrayImageDiff = img_differences.select(bands_thresholds).toArray()
-        arrayImage = image.select(bands_thresholds).toArray()
+            multitemporal_score, reflectance_score = SelectClusters(
+                image,
+                background_prediction,
+                result,
+                n_clusters,
+                bands_thresholds,
+                region_of_interest,
+            )
+        else:
+            diff_thresh_data = np.stack(
+                [image[b] - background_prediction[b] for b in bands_thresholds], axis=0
+            )
+            refl_thresh_data = np.stack([image[b] for b in bands_thresholds], axis=0)
 
-        arrayImageDiffmean = arrayImageDiff.arrayReduce(ee.Reducer.mean(), axes=[0])\
-                                           .gte(0).arrayGet([0])
-        arrayImageDiffnorm = arrayImageDiff.multiply(arrayImageDiff)\
-                                           .arrayReduce(ee.Reducer.mean(), axes=[0])\
-                                           .sqrt().arrayGet([0])
+            arrayImageDiffmean = np.mean(diff_thresh_data, axis=0)
+            arrayImageDiffnorm = np.sqrt(np.mean(diff_thresh_data**2, axis=0))
+            reflectance_score = np.sqrt(np.mean(refl_thresh_data**2, axis=0))
 
-        arrayImagenorm = arrayImage.multiply(arrayImage) \
-                                   .arrayReduce(ee.Reducer.mean(), axes=[0])\
-                                   .sqrt().arrayGet([0]) \
+            multitemporal_score = arrayImageDiffnorm * (arrayImageDiffmean >= 0)
 
-        reflectance_score = arrayImagenorm
+        if threshold_reflectance <= 0:
+            cloud_score_threshold = multitemporal_score > threshold_dif_cloud
+        else:
+            cloud_score_threshold = (multitemporal_score > threshold_dif_cloud) & (
+                reflectance_score > threshold_reflectance
+            )
 
-        multitemporal_score = arrayImageDiffnorm.multiply(arrayImageDiffmean)
+        y, x = np.ogrid[
+            -growing_ratio : growing_ratio + 1, -growing_ratio : growing_ratio + 1
+        ]
+        kernel = x**2 + y**2 <= growing_ratio**2
 
-    # Apply thresholds
-    if threshold_reflectance <= 0:
-        cloud_score_threshold = multitemporal_score.gt(threshold_dif_cloud)
-    else:
-        cloud_score_threshold = multitemporal_score.gt(threshold_dif_cloud)\
-                                                   .multiply(reflectance_score.gt(threshold_reflectance))
+        final_local_mask = binary_opening(
+            cloud_score_threshold, structure=kernel
+        ).astype(np.uint8)
 
-    # apply opening
-    kernel = ee.Kernel.circle(radius=growing_ratio)
-    cloud_score_threshold = cloud_score_threshold.focal_min(kernel=kernel).\
-        focal_max(kernel= kernel)
-
-    return cloud_score_threshold
-
+        return final_local_mask
