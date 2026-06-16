@@ -7,7 +7,7 @@ from scipy.stats import expon
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -52,9 +52,11 @@ def fit_model_local(ds_total,model,
                       output_dataset)
         else:
             if hasattr(model, "named_steps"):
+                letzter_schritt = list(model.named_steps.keys())[-1]
+                fit_parameter = {f"{letzter_schritt}__sample_weight": ds_total["weight"].values}
                 model.fit(ds_total[bands_estimation_input],
-                          output_dataset,
-                          randomizedsearchcv__sample_weight=ds_total["weight"].values)
+                        output_dataset,
+                        **fit_parameter)
             else:
                 model.fit(ds_total[bands_estimation_input],
                           output_dataset,
@@ -104,15 +106,11 @@ def KRRModel(n_jobs=2,
 
 def LinearModel(n_jobs=int(os.getenv("SLURM_CPUS_PER_TASK",3)),
                 cv=5, verbose=1,best_params=None):
-    if best_params is None:
-        ridge_cv = GridSearchCV(Ridge(),
-                                verbose=verbose,
-                                n_jobs=n_jobs,
-                                cv=cv,
-                                param_grid={"alpha": 10**np.arange(-5,10,1,dtype=np.float64)})
+    if best_params is not None:
+        best_params.pop("normalize", None)
     else:
-        if "normalize" in best_params:
-            del best_params["normalize"]
-        ridge_cv = Ridge(**best_params)
+        best_params = {"alpha": 1.0}
+        
+    ridge_cv = Ridge(**best_params)
 
     return ridge_cv
