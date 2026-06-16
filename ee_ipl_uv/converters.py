@@ -4,16 +4,18 @@ Created on June 02, 2016
 @author: Gonzalo Mateo Garcia
 @contact: gonzalo.mateo-garcia@uv.es
 '''
+import logging
+import os
+import shutil
+import time
+from datetime import datetime
+
 import ee
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from ee_ipl_uv import file_utils
-import os
 import requests
-import logging
-import shutil
-import time
+
+from ee_ipl_uv import file_utils
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +117,10 @@ def eeFeatureCollectionToPandas(feature_col, properties=None, with_task=False,
         if properties is None:
             url = feature_col.getDownloadURL(filetype=filetype)
         else:
-            properties_list = properties.getInfo()
+            if isinstance(properties, list):
+                properties_list = properties
+            else:
+                properties_list = properties.getInfo()
             url = feature_col.getDownloadURL(filetype=filetype,
                                              selectors=properties_list)
 

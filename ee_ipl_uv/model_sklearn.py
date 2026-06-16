@@ -1,14 +1,16 @@
-import pandas as pd
-from sklearn.metrics import mean_absolute_error,mean_squared_error
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
-from scipy.stats import expon
-import os
-import numpy as np
 import logging
+import os
+
+import numpy as np
+import pandas as pd
+from scipy.stats import expon
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
 logger = logging.getLogger(__name__)
 
 def fit_model_local(ds_total,model,
@@ -103,14 +105,14 @@ def KRRModel(n_jobs=2,
 def LinearModel(n_jobs=int(os.getenv("SLURM_CPUS_PER_TASK",3)),
                 cv=5, verbose=1,best_params=None):
     if best_params is None:
-        ridge_cv = GridSearchCV(Ridge(normalize=True),
+        ridge_cv = GridSearchCV(Ridge(),
                                 verbose=verbose,
                                 n_jobs=n_jobs,
                                 cv=cv,
                                 param_grid={"alpha": 10**np.arange(-5,10,1,dtype=np.float64)})
     else:
         if "normalize" not in best_params:
-            best_params["normalize"] = True
+            del best_params["normalize"]
         ridge_cv = Ridge(**best_params)
 
     return ridge_cv
