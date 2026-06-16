@@ -6,15 +6,18 @@ Created on June 12, 2016
 
 '''
 
-import ee
-import random
-from ee_ipl_uv import kernel
-from ee_ipl_uv import converters
-from ee_ipl_uv import time_series_operations
-from ee_ipl_uv import normalization
-from ee_ipl_uv import clustering
 import logging
+import random
 
+import ee
+
+from ee_ipl_uv import (
+    clustering,
+    converters,
+    kernel,
+    normalization,
+    time_series_operations,
+)
 
 CC_IMAGE_TOP = .6
 logger = logging.getLogger(__name__)
@@ -98,15 +101,19 @@ class ModelCloudMasking:
     def _BuildDataSet(self, sampling_factor,
                       normalize,numPixels=None):
 
-        estimation_set = self.img_est.sample(region=self.region,
-                                             factor=sampling_factor,
-                                             numPixels=numPixels,
-                                             seed=self.seed)
+        sample_kwargs = {
+            "region": self.region, 
+            "seed": self.seed
+        }
 
-        prediction_set = self.img_pred.sample(region=self.region,
-                                              factor=sampling_factor,
-                                              numPixels=numPixels,
-                                              seed=self.seed)
+        if numPixels is not None:
+            sample_kwargs["numPixels"] = numPixels
+        else:
+            sample_kwargs["factor"] = sampling_factor
+
+        estimation_set = self.img_est.sample(**sample_kwargs)
+        prediction_set = self.img_pred.sample(**sample_kwargs)
+
         # Add weights
         estimation_set_size = ee.Number(estimation_set.size())
         prediction_set_size = ee.Number(prediction_set.size())

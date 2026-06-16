@@ -26,3 +26,5 @@ ee_ipl_uv/__pycache__/clustering.cpython-313.pyc
 ee_ipl_uv/__pycache__/clustering.cpython-314.pyc
 ee_ipl_uv/__pycache__/converters.cpython-313.pyc
 ee_ipl_uv/__pycache__/converters.cpython-314.pyc
+
+*.csv
